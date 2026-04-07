@@ -1,37 +1,36 @@
-// Source: src/server/types/provider.ts
+// desktop/src/types/provider.ts
 
-export type ProviderModel = {
-  id: string
-  name: string
-  description?: string
-  context?: string
+export type ModelMapping = {
+  main: string
+  haiku: string
+  sonnet: string
+  opus: string
 }
 
-export type Provider = {
+export type SavedProvider = {
   id: string
+  presetId: string
   name: string
+  apiKey: string  // masked from server
   baseUrl: string
-  apiKey: string // masked from server: "sk-a****xyz"
-  models: ProviderModel[]
-  isActive: boolean
-  createdAt: number
-  updatedAt: number
+  models: ModelMapping
   notes?: string
 }
 
 export type CreateProviderInput = {
+  presetId: string
   name: string
-  baseUrl: string
   apiKey: string
-  models: ProviderModel[]
+  baseUrl: string
+  models: ModelMapping
   notes?: string
 }
 
 export type UpdateProviderInput = {
   name?: string
-  baseUrl?: string
   apiKey?: string
-  models?: ProviderModel[]
+  baseUrl?: string
+  models?: ModelMapping
   notes?: string
 }
 

@@ -1,7 +1,9 @@
+// desktop/src/stores/providerStore.ts
+
 import { create } from 'zustand'
 import { providersApi } from '../api/providers'
 import type {
-  Provider,
+  SavedProvider,
   CreateProviderInput,
   UpdateProviderInput,
   TestProviderConfigInput,
@@ -9,27 +11,30 @@ import type {
 } from '../types/provider'
 
 type ProviderStore = {
-  providers: Provider[]
+  providers: SavedProvider[]
+  activeId: string | null
   isLoading: boolean
 
   fetchProviders: () => Promise<void>
-  createProvider: (input: CreateProviderInput) => Promise<Provider>
-  updateProvider: (id: string, input: UpdateProviderInput) => Promise<Provider>
+  createProvider: (input: CreateProviderInput) => Promise<SavedProvider>
+  updateProvider: (id: string, input: UpdateProviderInput) => Promise<SavedProvider>
   deleteProvider: (id: string) => Promise<void>
-  activateProvider: (id: string, modelId: string) => Promise<void>
+  activateProvider: (id: string) => Promise<void>
+  activateOfficial: () => Promise<void>
   testProvider: (id: string) => Promise<ProviderTestResult>
   testConfig: (input: TestProviderConfigInput) => Promise<ProviderTestResult>
 }
 
 export const useProviderStore = create<ProviderStore>((set, get) => ({
   providers: [],
+  activeId: null,
   isLoading: false,
 
   fetchProviders: async () => {
     set({ isLoading: true })
     try {
-      const { providers } = await providersApi.list()
-      set({ providers, isLoading: false })
+      const { providers, activeId } = await providersApi.list()
+      set({ providers, activeId, isLoading: false })
     } catch {
       set({ isLoading: false })
     }
@@ -52,8 +57,13 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
     await get().fetchProviders()
   },
 
-  activateProvider: async (id, modelId) => {
-    await providersApi.activate(id, modelId)
+  activateProvider: async (id) => {
+    await providersApi.activate(id)
+    await get().fetchProviders()
+  },
+
+  activateOfficial: async () => {
+    await providersApi.activateOfficial()
     await get().fetchProviders()
   },
 

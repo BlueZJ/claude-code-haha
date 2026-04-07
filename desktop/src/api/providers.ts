@@ -1,14 +1,18 @@
+// desktop/src/api/providers.ts
+
 import { api } from './client'
 import type {
-  Provider,
+  SavedProvider,
   CreateProviderInput,
   UpdateProviderInput,
   TestProviderConfigInput,
   ProviderTestResult,
 } from '../types/provider'
+import type { ProviderPreset } from '../config/providerPresets'
 
-type ProvidersResponse = { providers: Provider[] }
-type ProviderResponse = { provider: Provider }
+type ProvidersResponse = { providers: SavedProvider[]; activeId: string | null }
+type ProviderResponse = { provider: SavedProvider }
+type PresetsResponse = { presets: ProviderPreset[] }
 type TestResultResponse = { result: ProviderTestResult }
 
 export const providersApi = {
@@ -16,8 +20,8 @@ export const providersApi = {
     return api.get<ProvidersResponse>('/api/providers')
   },
 
-  get(id: string) {
-    return api.get<ProviderResponse>(`/api/providers/${id}`)
+  presets() {
+    return api.get<PresetsResponse>('/api/providers/presets')
   },
 
   create(input: CreateProviderInput) {
@@ -32,8 +36,12 @@ export const providersApi = {
     return api.delete<{ ok: true }>(`/api/providers/${id}`)
   },
 
-  activate(id: string, modelId: string) {
-    return api.post<{ ok: true }>(`/api/providers/${id}/activate`, { modelId })
+  activate(id: string) {
+    return api.post<{ ok: true }>(`/api/providers/${id}/activate`)
+  },
+
+  activateOfficial() {
+    return api.post<{ ok: true }>('/api/providers/official')
   },
 
   test(id: string) {
