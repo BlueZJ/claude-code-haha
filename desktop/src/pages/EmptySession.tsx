@@ -6,6 +6,7 @@ import { DirectoryPicker } from '../components/shared/DirectoryPicker'
 import { PermissionModeSelector } from '../components/controls/PermissionModeSelector'
 import { ModelSelector } from '../components/controls/ModelSelector'
 import { AttachmentGallery } from '../components/chat/AttachmentGallery'
+import { FileSearchMenu, type FileSearchMenuHandle } from '../components/chat/FileSearchMenu'
 import {
   FALLBACK_SLASH_COMMANDS,
   findSlashToken,
@@ -30,12 +31,16 @@ export function EmptySession() {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
+  const [fileSearchOpen, setFileSearchOpen] = useState(false)
+  const [atFilter, setAtFilter] = useState('')
+  const [atCursorPos, setAtCursorPos] = useState(-1)
   const [slashFilter, setSlashFilter] = useState('')
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const plusMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
+  const fileSearchRef = useRef<FileSearchMenuHandle>(null)
   const slashItemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const createSession = useSessionStore((state) => state.createSession)
   const sendMessage = useChatStore((state) => state.sendMessage)
@@ -73,6 +78,23 @@ export function EmptySession() {
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [slashMenuOpen])
+
+  useEffect(() => {
+    if (!fileSearchOpen) return
+    const handleClick = (event: MouseEvent) => {
+      const menu = document.getElementById('file-search-menu')
+      if (
+        menu &&
+        !menu.contains(event.target as Node) &&
+        textareaRef.current &&
+        !textareaRef.current.contains(event.target as Node)
+      ) {
+        setFileSearchOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [fileSearchOpen])
 
   const filteredCommands = FALLBACK_SLASH_COMMANDS.filter((command) => {
     if (!slashFilter) return true
@@ -123,13 +145,57 @@ export function EmptySession() {
     const token = findSlashToken(value, cursorPos)
     if (!token) {
       setSlashMenuOpen(false)
-      return
+    } else {
+      setSlashFilter(token.filter)
+      setSlashMenuOpen(true)
     }
-    setSlashFilter(token.filter)
-    setSlashMenuOpen(true)
+
+    // Detect @ trigger for file search
+    const textBeforeCursor = value.slice(0, cursorPos)
+    let pos = -1
+    for (let i = textBeforeCursor.length - 1; i >= 0; i--) {
+      const ch = textBeforeCursor[i]!
+      if (ch === '@') {
+        if (i === 0 || /\s/.test(textBeforeCursor[i - 1]!)) {
+          pos = i
+          break
+        }
+        break
+      }
+      if (/\s/.test(ch)) {
+        break
+      }
+    }
+    if (pos < 0) {
+      setFileSearchOpen(false)
+      setAtFilter('')
+      setAtCursorPos(-1)
+    } else {
+      setAtFilter(textBeforeCursor.slice(pos + 1))
+      setAtCursorPos(cursorPos)
+      setSlashMenuOpen(false)
+      setFileSearchOpen(true)
+    }
   }
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    // Route file search navigation keys to FileSearchMenu
+    if (fileSearchOpen) {
+      const key = event.key
+      if (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter' || key === 'Tab' || key === 'Escape') {
+        event.preventDefault()
+        if (key === 'Escape') {
+          setFileSearchOpen(false)
+          setAtFilter('')
+          setAtCursorPos(-1)
+          return
+        }
+        fileSearchRef.current?.handleKeyDown(event.nativeEvent)
+        return
+      }
+      return
+    }
+
     if (slashMenuOpen && filteredCommands.length > 0) {
       if (event.key === 'ArrowDown') {
         event.preventDefault()
@@ -284,6 +350,28 @@ export function EmptySession() {
             onDragOver={(event) => event.preventDefault()}
             onDrop={handleDrop}
           >
+            {fileSearchOpen && (
+              <FileSearchMenu
+                ref={fileSearchRef}
+                cwd={workDir || ''}
+                filter={atFilter}
+                onSelect={(_path, name) => {
+                  if (atCursorPos >= 0) {
+                    const newValue = `${input.slice(0, atCursorPos)}${name}${input.slice(atCursorPos)}`
+                    const newCursorPos = atCursorPos + name.length
+                    setInput(newValue)
+                    setFileSearchOpen(false)
+                    setAtFilter('')
+                    setAtCursorPos(-1)
+                    void textareaRef.current?.focus()
+                    requestAnimationFrame(() => {
+                      textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos)
+                    })
+                  }
+                }}
+              />
+            )}
+
             {slashMenuOpen && filteredCommands.length > 0 && (
               <div
                 ref={slashMenuRef}

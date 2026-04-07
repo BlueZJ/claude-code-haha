@@ -7,6 +7,7 @@ import { ModelSelector } from '../controls/ModelSelector'
 import type { AttachmentRef } from '../../types/chat'
 import { AttachmentGallery } from './AttachmentGallery'
 import { ProjectContextChip } from '../shared/ProjectContextChip'
+import { FileSearchMenu, type FileSearchMenuHandle } from './FileSearchMenu'
 import {
   FALLBACK_SLASH_COMMANDS,
   findSlashTrigger,
@@ -29,12 +30,16 @@ export function ChatInput() {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
+  const [fileSearchOpen, setFileSearchOpen] = useState(false)
+  const [atFilter, setAtFilter] = useState('')
+  const [atCursorPos, setAtCursorPos] = useState(-1)
   const [slashFilter, setSlashFilter] = useState('')
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const plusMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
+  const fileSearchRef = useRef<FileSearchMenuHandle>(null)
   const slashItemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const { sendMessage, chatState, stopGeneration, slashCommands } = useChatStore()
   const activeSessionId = useSessionStore((state) => state.activeSessionId)
@@ -91,6 +96,23 @@ export function ChatInput() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [slashMenuOpen])
 
+  useEffect(() => {
+    if (!fileSearchOpen) return
+    const handleClick = (event: MouseEvent) => {
+      const menu = document.getElementById('file-search-menu')
+      if (
+        menu &&
+        !menu.contains(event.target as Node) &&
+        textareaRef.current &&
+        !textareaRef.current.contains(event.target as Node)
+      ) {
+        setFileSearchOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [fileSearchOpen])
+
   const filteredCommands = useMemo(() => {
     const source = slashCommands.length > 0 ? slashCommands : FALLBACK_SLASH_COMMANDS
     if (!slashFilter) return source
@@ -118,14 +140,51 @@ export function ChatInput() {
       return
     }
 
+    setFileSearchOpen(false)
     setSlashFilter(token.filter)
     setSlashMenuOpen(true)
   }, [])
 
+  // Detect @ trigger (file search)
+  const detectAtTrigger = useCallback((value: string, cursorPos: number) => {
+    const textBeforeCursor = value.slice(0, cursorPos)
+    let pos = -1
+
+    for (let i = textBeforeCursor.length - 1; i >= 0; i--) {
+      const ch = textBeforeCursor[i]!
+      if (ch === '@') {
+        if (i === 0 || /\s/.test(textBeforeCursor[i - 1]!)) {
+          pos = i
+          break
+        }
+        break
+      }
+      if (/\s/.test(ch)) {
+        break
+      }
+    }
+
+    if (pos < 0) {
+      setFileSearchOpen(false)
+      setAtFilter('')
+      setAtCursorPos(-1)
+      return
+    }
+
+    // Extract filter text after @
+    const filter = textBeforeCursor.slice(pos + 1)
+    setAtFilter(filter)
+    setAtCursorPos(cursorPos)
+    setSlashMenuOpen(false)
+    setFileSearchOpen(true)
+  }, [])
+
   const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value
+    const cursorPos = event.target.selectionStart ?? value.length
     setInput(value)
-    detectSlashTrigger(value, event.target.selectionStart ?? value.length)
+    detectSlashTrigger(value, cursorPos)
+    detectAtTrigger(value, cursorPos)
   }
 
   const selectSlashCommand = useCallback((command: string) => {
@@ -159,6 +218,24 @@ export function ChatInput() {
   }
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    // Route file search navigation keys to FileSearchMenu
+    if (fileSearchOpen) {
+      const key = event.key
+      if (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter' || key === 'Tab' || key === 'Escape') {
+        event.preventDefault()
+        if (key === 'Escape') {
+          setFileSearchOpen(false)
+          setAtFilter('')
+          setAtCursorPos(-1)
+          return
+        }
+        fileSearchRef.current?.handleKeyDown(event.nativeEvent)
+        return
+      }
+      // Other keys (typing) should go to the textarea - let it propagate
+      return
+    }
+
     if (slashMenuOpen && filteredCommands.length > 0) {
       if (event.key === 'ArrowDown') {
         event.preventDefault()
@@ -287,6 +364,29 @@ export function ChatInput() {
           onDragOver={(event) => event.preventDefault()}
           onDrop={handleDrop}
         >
+          {fileSearchOpen && (
+            <FileSearchMenu
+              ref={fileSearchRef}
+              cwd={gitInfo?.workDir || activeSession?.workDir || ''}
+              filter={atFilter}
+              onSelect={(_path, name) => {
+                if (atCursorPos >= 0) {
+                  // Insert name at cursor position, replacing filter text
+                  const newValue = `${input.slice(0, atCursorPos)}${name}${input.slice(atCursorPos)}`
+                  const newCursorPos = atCursorPos + name.length
+                  setInput(newValue)
+                  setFileSearchOpen(false)
+                  setAtFilter('')
+                  setAtCursorPos(-1)
+                  void textareaRef.current?.focus()
+                  requestAnimationFrame(() => {
+                    textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos)
+                  })
+                }
+              }}
+            />
+          )}
+
           {slashMenuOpen && filteredCommands.length > 0 && (
             <div
               ref={slashMenuRef}

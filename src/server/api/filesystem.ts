@@ -1,5 +1,6 @@
 /**
- * Filesystem browser API — returns directory listings for the DirectoryPicker component.
+ * Filesystem browser & search API — supports directory browsing and file search
+ * for the DirectoryPicker component and @-triggered file search popup.
  */
 
 import * as path from 'path'
@@ -16,6 +17,9 @@ export async function handleFilesystemRoute(pathname: string, url: URL): Promise
 async function handleBrowse(url: URL): Promise<Response> {
   const targetPath = url.searchParams.get('path') || process.env.HOME || '/'
   const resolvedPath = path.resolve(targetPath)
+  const searchQuery = url.searchParams.get('search') || ''
+  const includeFiles = url.searchParams.get('includeFiles') === 'true'
+  const maxResults = Math.min(parseInt(url.searchParams.get('maxResults') || '200', 10), 200)
 
   try {
     const stat = fs.statSync(resolvedPath)
@@ -24,19 +28,59 @@ async function handleBrowse(url: URL): Promise<Response> {
     }
 
     const entries = fs.readdirSync(resolvedPath, { withFileTypes: true })
-    const dirs = entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+
+    if (searchQuery) {
+      // Search mode: filter by filename, include both dirs and files
+      const query = searchQuery.toLowerCase()
+      const results = entries
+        .filter((e) => {
+          if (e.name.startsWith('.')) return false
+          if (e.isDirectory()) return e.name.toLowerCase().includes(query)
+          if (!includeFiles) return false
+          return e.name.toLowerCase().includes(query)
+        })
+        .slice(0, maxResults)
+        .map((e) => ({
+          name: e.name,
+          path: path.join(resolvedPath, e.name),
+          isDirectory: e.isDirectory(),
+        }))
+        .sort((a, b) => {
+          // Directories first, then alphabetically
+          if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+          return a.name.localeCompare(b.name)
+        })
+
+      return json({
+        currentPath: resolvedPath,
+        parentPath: path.dirname(resolvedPath),
+        entries: results,
+        query: searchQuery,
+      })
+    }
+
+    // Browse mode: show all directories (and optionally files)
+    const filtered = entries.filter((e) => {
+      if (e.name.startsWith('.')) return false
+      if (e.isDirectory()) return true
+      return includeFiles
+    })
+
+    const entries_list = filtered
       .map((e) => ({
         name: e.name,
         path: path.join(resolvedPath, e.name),
-        isDirectory: true,
+        isDirectory: e.isDirectory(),
       }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
 
     return json({
       currentPath: resolvedPath,
       parentPath: path.dirname(resolvedPath),
-      entries: dirs,
+      entries: entries_list,
     })
   } catch (err) {
     return json({ error: `Cannot read directory: ${err}`, path: resolvedPath }, 500)
