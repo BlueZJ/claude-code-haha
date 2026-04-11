@@ -767,12 +767,7 @@ async function handleServerMessage(chatId: string, msg: ServerMessage): Promise<
   }
 }
 
-// ---------- extract message text ----------
-
-function extractText(content: string, msgType: string): string | null {
-  const { text } = extractInboundPayload(content, msgType)
-  return text.trim() || null
-}
+// ---------- message helpers ----------
 
 function isBotMentioned(mentions?: Array<{ id?: { open_id?: string } }>): boolean {
   if (!mentions || !botOpenId) return false
@@ -813,7 +808,7 @@ async function handleMessage(data: any): Promise<void> {
   if (chatType === 'p2p') {
     if (!isAllowedUser('feishu', senderOpenId)) {
       // 尝试配对
-      const pairText = extractText(content, msgType)
+      const pairText = extractInboundPayload(content, msgType).text.trim() || null
       if (pairText) {
         const success = tryPair(pairText.trim(), { userId: senderOpenId, displayName: 'Feishu User' }, 'feishu')
         if (success) {

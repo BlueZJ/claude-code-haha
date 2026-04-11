@@ -27,6 +27,12 @@ describe('checkAttachmentLimit', () => {
     if (!result.ok) expect(result.reason).toBe('unsupported_mime')
   })
 
+  it('rejects image/heic (not supported by Claude API)', () => {
+    const result = checkAttachmentLimit('image', 500_000, 'image/heic')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toBe('unsupported_mime')
+  })
+
   it('accepts a 10 MB PDF file', () => {
     const result = checkAttachmentLimit('file', 10 * 1024 * 1024, 'application/pdf')
     expect(result.ok).toBe(true)

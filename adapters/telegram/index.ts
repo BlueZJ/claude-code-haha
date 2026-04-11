@@ -637,7 +637,7 @@ async function collectAttachmentsFromCtx(
       }
     } catch (err) {
       console.error('[Telegram] downloadFile failed:', err)
-      rejections.push('📎 附件下载失败')
+      rejections.push('📎 附件下载失败,请稍后重试')
     }
   }
 

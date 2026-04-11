@@ -14,7 +14,6 @@ export const IMAGE_MIME_WHITELIST = [
   'image/png',
   'image/gif',
   'image/webp',
-  'image/heic',
 ] as const
 
 export type LimitCheckResult =
