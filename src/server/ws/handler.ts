@@ -33,6 +33,12 @@ const sessionSlashCommands = new Map<string, Array<{ name: string; description: 
 const sessionCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 /**
+ * Track sessions where user requested stop — suppress the CLI_ERROR that
+ * follows an interrupt so the frontend doesn't show "处理过程中发生错误".
+ */
+const sessionStopRequested = new Set<string>()
+
+/**
  * Track user message count and title state per session for auto-title generation.
  */
 const sessionTitleState = new Map<string, {
@@ -147,15 +153,15 @@ export const handleWebSocket = {
     sessionSlashCommands.delete(sessionId)
     sessionTitleState.delete(sessionId)
 
-    // Schedule delayed cleanup: if the client doesn't reconnect within 5 minutes,
+    // Schedule delayed cleanup: if the client doesn't reconnect within 30 seconds,
     // stop the CLI subprocess to avoid leaking resources.
     const cleanupTimer = setTimeout(() => {
       sessionCleanupTimers.delete(sessionId)
       if (!activeSessions.has(sessionId)) {
-        console.log(`[WS] Session ${sessionId} not reconnected after 5 min, stopping CLI subprocess`)
+        console.log(`[WS] Session ${sessionId} not reconnected after 30s, stopping CLI subprocess`)
         conversationService.stopSession(sessionId)
       }
-    }, 5 * 60 * 1000)
+    }, 30_000)
     sessionCleanupTimers.set(sessionId, cleanupTimer)
   },
 
@@ -174,6 +180,9 @@ async function handleUserMessage(
 ) {
   const { sessionId } = ws.data
   let workDir = os.homedir()
+
+  // Clear any stale stop flag from a previous turn
+  sessionStopRequested.delete(sessionId)
 
   // Send thinking status
   sendMessage(ws, { type: 'status', state: 'thinking', verb: 'Thinking' })
@@ -306,9 +315,19 @@ function handleStopGeneration(ws: ServerWebSocket<WebSocketData>) {
   const { sessionId } = ws.data
   console.log(`[WS] Stop generation requested for session: ${sessionId}`)
 
-  // 向 CLI 子进程发送中断信号
+  sessionStopRequested.add(sessionId)
+
   if (conversationService.hasSession(sessionId)) {
+    // First try graceful interrupt via SDK control message
     conversationService.sendInterrupt(sessionId)
+
+    // Force-kill if still running after 3 seconds
+    setTimeout(() => {
+      if (conversationService.hasSession(sessionId)) {
+        console.log(`[WS] Force-killing CLI subprocess for session: ${sessionId}`)
+        conversationService.stopSession(sessionId)
+      }
+    }, 3_000)
   }
 
   sendMessage(ws, { type: 'status', state: 'idle' })
@@ -587,6 +606,13 @@ function translateCliMessage(cliMsg: any, sessionId: string): ServerMessage[] {
       }
 
       if (cliMsg.is_error) {
+        // If the user requested stop, this "error" is just the interrupt
+        // result — don't show it as an error in the chat UI.
+        if (sessionStopRequested.has(sessionId)) {
+          sessionStopRequested.delete(sessionId)
+          return [{ type: 'message_complete', usage }]
+        }
+
         const resultMessage =
           (typeof cliMsg.result === 'string' && cliMsg.result) ||
           (Array.isArray(cliMsg.errors) && cliMsg.errors.length > 0
@@ -603,6 +629,8 @@ function translateCliMessage(cliMsg: any, sessionId: string): ServerMessage[] {
         ]
       }
 
+      // Clear stop flag on successful completion too
+      sessionStopRequested.delete(sessionId)
       return [{ type: 'message_complete', usage }]
     }
 
@@ -717,7 +745,7 @@ async function getRuntimeSettings(): Promise<{
     // Otherwise the CLI should use ANTHROPIC_MODEL from env (set by syncToSettings).
     // Default Anthropic model should be overridden by the provider's model.
     const baseModel = (userSettings.model as string) || ''
-    if (baseModel && baseModel !== 'claude-sonnet-4-6-20250514') {
+    if (baseModel && baseModel !== 'claude-sonnet-4-6') {
       // User explicitly selected a different model — pass it through
       model = baseModel
       if (modelContext) model += `:${modelContext}`
